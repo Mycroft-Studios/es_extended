@@ -142,11 +142,6 @@ function loadESXPlayer(identifier, playerId, isNew)
 			if gradeObject.skin_male then userData.job.skin_male = json.decode(gradeObject.skin_male) end
 			if gradeObject.skin_female then userData.job.skin_female = json.decode(gradeObject.skin_female) end
 			
-   -- Inventory
-          if result[1].inventory and result[1].inventory ~= '' then
-              userData.inventory = json.decode(result[1].inventory)
-          end
-		
 			-- Group
 			if result[1].group then
 				if result[1].group == "superadmin" then
