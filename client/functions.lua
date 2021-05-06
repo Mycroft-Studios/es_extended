@@ -308,21 +308,16 @@ ESX.Game.GetPedMugshot = function(ped, transparent)
 end
 
 ESX.Game.Teleport = function(entity, coords, cb)
+	local vector = type(coords) == "vector4" and coords or type(coords) == "vector3" and vector4(coords, 0.0) or vec(coords.x, coords.y, coords.z, coords.heading or 0.0)
+	
 	if DoesEntityExist(entity) then
-		RequestCollisionAtCoord(coords.x, coords.y, coords.z)
-		local timeout = 0
-
-		-- we can get stuck here if any of the axies are "invalid"
-		while not HasCollisionLoadedAroundEntity(entity) and timeout < 2000 do
-			Citizen.Wait(0)
-			timeout = timeout + 1
+		RequestCollisionAtCoord(vector.xyz)
+		while not HasCollisionLoadedAroundEntity(entity) do
+			Wait(0)
 		end
 
-		SetEntityCoords(entity, coords.x, coords.y, coords.z, false, false, false, false)
-
-		if type(coords) == 'table' and coords.heading then
-			SetEntityHeading(entity, coords.heading)
-		end
+		SetEntityCoords(entity, vector.xyz, false, false, false, false)
+		SetEntityHeading(entity, vector.w)
 	end
 
 	if cb then
@@ -330,14 +325,18 @@ ESX.Game.Teleport = function(entity, coords, cb)
 	end
 end
 
-ESX.Game.SpawnObject = function(model, coords, cb)
-	local model = (type(model) == 'number' and model or GetHashKey(model))
-
-	Citizen.CreateThread(function()
+ESX.Game.SpawnObject = function(model, coords, cb, networked, dynamic)
+	local vector = type(coords) == "vector3" and coords or vec(coords.x, coords.y, coords.z)
+	networked = networked == nil and true or false
+	dynamic = dynamic ~= nil and true or false
+	
+	CreateThread(function()
 		ESX.Streaming.RequestModel(model)
-		local obj = CreateObject(model, coords.x, coords.y, coords.z, true, false, true)
-		SetModelAsNoLongerNeeded(model)
-
+		
+		-- The below has to be done just for CreateObject since for some reason CreateObjects model argument is set
+		-- as an Object instead of a hash so it doesn't automatically hash the item
+		model = type(model) == 'number' and model or GetHashKey(model)
+		local obj = CreateObject(model, vector.xyz, networked, false, dynamic)
 		if cb then
 			cb(obj)
 		end
@@ -345,17 +344,8 @@ ESX.Game.SpawnObject = function(model, coords, cb)
 end
 
 ESX.Game.SpawnLocalObject = function(model, coords, cb)
-	local model = (type(model) == 'number' and model or GetHashKey(model))
-
-	Citizen.CreateThread(function()
-		ESX.Streaming.RequestModel(model)
-		local obj = CreateObject(model, coords.x, coords.y, coords.z, false, false, true)
-		SetModelAsNoLongerNeeded(model)
-
-		if cb then
-			cb(obj)
-		end
-	end)
+	-- Why have 2 separate functions for this? Just call the other one with an extra param
+	ESX.Game.SpawnObject(model, coords, cb, false)
 end
 
 ESX.Game.DeleteVehicle = function(vehicle)
@@ -368,28 +358,25 @@ ESX.Game.DeleteObject = function(object)
 	DeleteObject(object)
 end
 
-ESX.Game.SpawnVehicle = function(modelName, coords, heading, cb)
-	local model = (type(modelName) == 'number' and modelName or GetHashKey(modelName))
-
-	Citizen.CreateThread(function()
+ESX.Game.SpawnVehicle = function(model, coords, heading, cb, networked)
+	local vector = type(coords) == "vector3" and coords or vec(coords.x, coords.y, coords.z)
+	networked = networked == nil and true or false
+	CreateThread(function()
 		ESX.Streaming.RequestModel(model)
 
-		local vehicle = CreateVehicle(model, coords.x, coords.y, coords.z, heading, true, false)
-		local networkId = NetworkGetNetworkIdFromEntity(vehicle)
-		local timeout = 0
+		local vehicle = CreateVehicle(model, vector.xyz, heading, networked, false)
+		local id = NetworkGetNetworkIdFromEntity(vehicle)
 
-		SetNetworkIdCanMigrate(networkId, true)
+		SetNetworkIdCanMigrate(id, true)
 		SetEntityAsMissionEntity(vehicle, true, false)
 		SetVehicleHasBeenOwnedByPlayer(vehicle, true)
 		SetVehicleNeedsToBeHotwired(vehicle, false)
-		SetVehRadioStation(vehicle, 'OFF')
 		SetModelAsNoLongerNeeded(model)
-		RequestCollisionAtCoord(coords.x, coords.y, coords.z)
+		SetVehRadioStation(vehicle, 'OFF')
 
-		-- we can get stuck here if any of the axies are "invalid"
-		while not HasCollisionLoadedAroundEntity(vehicle) and timeout < 2000 do
-			Citizen.Wait(0)
-			timeout = timeout + 1
+		RequestCollisionAtCoord(vector.xyz)
+		while not HasCollisionLoadedAroundEntity(vehicle) do
+			Wait(0)
 		end
 
 		if cb then
@@ -398,32 +385,9 @@ ESX.Game.SpawnVehicle = function(modelName, coords, heading, cb)
 	end)
 end
 
-ESX.Game.SpawnLocalVehicle = function(modelName, coords, heading, cb)
-	local model = (type(modelName) == 'number' and modelName or GetHashKey(modelName))
-
-	Citizen.CreateThread(function()
-		ESX.Streaming.RequestModel(model)
-
-		local vehicle = CreateVehicle(model, coords.x, coords.y, coords.z, heading, false, false)
-		local timeout = 0
-
-		SetEntityAsMissionEntity(vehicle, true, false)
-		SetVehicleHasBeenOwnedByPlayer(vehicle, true)
-		SetVehicleNeedsToBeHotwired(vehicle, false)
-		SetVehRadioStation(vehicle, 'OFF')
-		SetModelAsNoLongerNeeded(model)
-		RequestCollisionAtCoord(coords.x, coords.y, coords.z)
-
-		-- we can get stuck here if any of the axies are "invalid"
-		while not HasCollisionLoadedAroundEntity(vehicle) and timeout < 2000 do
-			Citizen.Wait(0)
-			timeout = timeout + 1
-		end
-
-		if cb then
-			cb(vehicle)
-		end
-	end)
+ESX.Game.SpawnLocalVehicle = function(model, coords, heading, cb)
+	-- Why have 2 separate functions for this? Just call the other one with an extra param
+	ESX.Game.SpawnVehicle(model, coords, heading, cb, false)
 end
 
 ESX.Game.IsVehicleEmpty = function(vehicle)
@@ -749,254 +713,6 @@ ESX.Game.Utils.DrawText3D = function(coords, text, scale, font)
 	ClearDrawOrigin()
 end
 
-ESX.ShowInventory = function()
-	local playerPed = PlayerPedId()
-	local elements, currentWeight = {}, 0
-
-	for k,v in pairs(ESX.PlayerData.accounts) do
-		if v.money > 0 then
-		local formattedMoney = _U('locale_currency', ESX.Math.GroupDigits(v.money))
-			local canDrop = v.name ~= 'bank'
-
-			table.insert(elements, {
-				label = ('%s: <span style="color:green;">%s</span>'):format(v.label, formattedMoney),
-				count = v.money,
-				type = 'item_account',
-				value = v.name,
-				usable = false,
-				rare = false,
-				canRemove = canDrop
-			})
-		end
-	end 
-
-	for k,v in ipairs(ESX.PlayerData.inventory) do
-		if v.count > 0 then
-			currentWeight = currentWeight + (v.weight * v.count)
-
-			table.insert(elements, {
-				label = ('%s x%s'):format(v.label, v.count),
-				count = v.count,
-				type = 'item_standard',
-				value = v.name,
-				usable = v.usable,
-				rare = v.rare,
-				canRemove = v.canRemove
-			})
-		end
-	end
-
-	for k,v in ipairs(Config.Weapons) do
-		local weaponHash = GetHashKey(v.name)
-
-		if HasPedGotWeapon(playerPed, weaponHash, false) then
-			local ammo, label = GetAmmoInPedWeapon(playerPed, weaponHash)
-
-			if v.ammo then
-				label = ('%s - %s %s'):format(v.label, ammo, v.ammo.label)
-			else
-				label = v.label
-			end
-
-			table.insert(elements, {
-				label = label,
-				count = 1,
-				type = 'item_weapon',
-				value = v.name,
-				usable = false,
-				rare = false,
-				ammo = ammo,
-				canGiveAmmo = (v.ammo ~= nil),
-				canRemove = true
-			})
-		end
-	end
-
-	ESX.UI.Menu.CloseAll()
-
-	ESX.UI.Menu.Open('default', GetCurrentResourceName(), 'inventory', {
-		title    = _U('inventory', currentWeight, ESX.PlayerData.maxWeight),
-		align    = 'bottom-right',
-		elements = elements
-	}, function(data, menu)
-		menu.close()
-		local player, distance = ESX.Game.GetClosestPlayer()
-		elements = {}
-
-		if data.current.usable then
-			table.insert(elements, {label = _U('use'), action = 'use', type = data.current.type, value = data.current.value})
-		end
-
-		if data.current.canRemove then
-			if player ~= -1 and distance <= 3.0 then
-				table.insert(elements, {label = _U('give'), action = 'give', type = data.current.type, value = data.current.value})
-			end
-
-			table.insert(elements, {label = _U('remove'), action = 'remove', type = data.current.type, value = data.current.value})
-		end
-
-		if data.current.type == 'item_weapon' and data.current.canGiveAmmo and data.current.ammo > 0 and player ~= -1 and distance <= 3.0 then
-			table.insert(elements, {label = _U('giveammo'), action = 'give_ammo', type = data.current.type, value = data.current.value})
-		end
-
-		table.insert(elements, {label = _U('return'), action = 'return'})
-
-		ESX.UI.Menu.Open('default', GetCurrentResourceName(), 'inventory_item', {
-			title    = data.current.label,
-			align    = 'bottom-right',
-			elements = elements,
-		}, function(data1, menu1)
-			local item, type = data1.current.value, data1.current.type
-
-			if data1.current.action == 'give' then
-				local playersNearby = ESX.Game.GetPlayersInArea(GetEntityCoords(playerPed), 3.0)
-
-				if #playersNearby > 0 then
-					local players = {}
-					elements = {}
-
-					for k,playerNearby in ipairs(playersNearby) do
-						players[GetPlayerServerId(playerNearby)] = true
-					end
-
-					ESX.TriggerServerCallback('esx:getPlayerNames', function(returnedPlayers)
-						for playerId,playerName in pairs(returnedPlayers) do
-							table.insert(elements, {
-								label = playerName,
-								playerId = playerId
-							})
-						end
-
-						ESX.UI.Menu.Open('default', GetCurrentResourceName(), 'give_item_to', {
-							title    = _U('give_to'),
-							align    = 'bottom-right',
-							elements = elements
-						}, function(data2, menu2)
-							local selectedPlayer, selectedPlayerId = GetPlayerFromServerId(data2.current.playerId), data2.current.playerId
-							playersNearby = ESX.Game.GetPlayersInArea(GetEntityCoords(playerPed), 3.0)
-							playersNearby = ESX.Table.Set(playersNearby)
-
-							if playersNearby[selectedPlayer] then
-								local selectedPlayerPed = GetPlayerPed(selectedPlayer)
-
-								if IsPedOnFoot(selectedPlayerPed) and not IsPedFalling(selectedPlayerPed) then
-									if type == 'item_weapon' then
-										TriggerServerEvent('esx:giveInventoryItem', selectedPlayerId, type, item, nil)
-										menu2.close()
-										menu1.close()
-									else
-										ESX.UI.Menu.Open('dialog', GetCurrentResourceName(), 'inventory_item_count_give', {
-											title = _U('amount')
-										}, function(data3, menu3)
-											local quantity = tonumber(data3.value)
-
-											if quantity and quantity > 0 and data.current.count >= quantity then
-												TriggerServerEvent('esx:giveInventoryItem', selectedPlayerId, type, item, quantity)
-												menu3.close()
-												menu2.close()
-												menu1.close()
-											else
-												ESX.ShowNotification(_U('amount_invalid'))
-											end
-										end, function(data3, menu3)
-											menu3.close()
-										end)
-									end
-								else
-									ESX.ShowNotification(_U('in_vehicle'))
-								end
-							else
-								ESX.ShowNotification(_U('players_nearby'))
-								menu2.close()
-							end
-						end, function(data2, menu2)
-							menu2.close()
-						end)
-					end, players)
-				else
-					ESX.ShowNotification(_U('players_nearby'))
-				end
-			elseif data1.current.action == 'remove' then
-				if IsPedOnFoot(playerPed) and not IsPedFalling(playerPed) then
-					local dict, anim = 'weapons@first_person@aim_rng@generic@projectile@sticky_bomb@', 'plant_floor'
-					ESX.Streaming.RequestAnimDict(dict)
-
-					if type == 'item_weapon' then
-						menu1.close()
-						TaskPlayAnim(playerPed, dict, anim, 8.0, 1.0, 1000, 16, 0.0, false, false, false)
-						Citizen.Wait(1000)
-						TriggerServerEvent('esx:removeInventoryItem', type, item)
-					else
-						ESX.UI.Menu.Open('dialog', GetCurrentResourceName(), 'inventory_item_count_remove', {
-							title = _U('amount')
-						}, function(data2, menu2)
-							local quantity = tonumber(data2.value)
-
-							if quantity and quantity > 0 and data.current.count >= quantity then
-								menu2.close()
-								menu1.close()
-								TaskPlayAnim(playerPed, dict, anim, 8.0, 1.0, 1000, 16, 0.0, false, false, false)
-								Citizen.Wait(1000)
-								TriggerServerEvent('esx:removeInventoryItem', type, item, quantity)
-							else
-								ESX.ShowNotification(_U('amount_invalid'))
-							end
-						end, function(data2, menu2)
-							menu2.close()
-						end)
-					end
-				end
-			elseif data1.current.action == 'use' then
-				TriggerServerEvent('esx:useItem', item)
-			elseif data1.current.action == 'return' then
-				ESX.UI.Menu.CloseAll()
-				ESX.ShowInventory()
-			elseif data1.current.action == 'give_ammo' then
-				local closestPlayer, closestDistance = ESX.Game.GetClosestPlayer()
-				local closestPed = GetPlayerPed(closestPlayer)
-				local pedAmmo = GetAmmoInPedWeapon(playerPed, GetHashKey(item))
-
-				if IsPedOnFoot(closestPed) and not IsPedFalling(closestPed) then
-					if closestPlayer ~= -1 and closestDistance < 3.0 then
-						if pedAmmo > 0 then
-							ESX.UI.Menu.Open('dialog', GetCurrentResourceName(), 'inventory_item_count_give', {
-								title = _U('amountammo')
-							}, function(data2, menu2)
-								local quantity = tonumber(data2.value)
-
-								if quantity and quantity > 0 then
-									if pedAmmo >= quantity then
-										TriggerServerEvent('esx:giveInventoryItem', GetPlayerServerId(closestPlayer), 'item_ammo', item, quantity)
-										menu2.close()
-										menu1.close()
-									else
-										ESX.ShowNotification(_U('noammo'))
-									end
-								else
-									ESX.ShowNotification(_U('amount_invalid'))
-								end
-							end, function(data2, menu2)
-								menu2.close()
-							end)
-						else
-							ESX.ShowNotification(_U('noammo'))
-						end
-					else
-						ESX.ShowNotification(_U('players_nearby'))
-					end
-				else
-					ESX.ShowNotification(_U('in_vehicle'))
-				end
-			end
-		end, function(data1, menu1)
-			ESX.UI.Menu.CloseAll()
-			ESX.ShowInventory()
-		end)
-	end, function(data, menu)
-		menu.close()
-	end)
-end
-
 RegisterNetEvent('esx:serverCallback')
 AddEventHandler('esx:serverCallback', function(requestId, ...)
 	ESX.ServerCallbacks[requestId](...)
@@ -1022,15 +738,22 @@ end)
 Citizen.CreateThread(function()
 	while true do
 		Citizen.Wait(0)
+		local letSleep = true
 		local currTime = GetGameTimer()
 
-		for i=1, #ESX.TimeoutCallbacks, 1 do
-			if ESX.TimeoutCallbacks[i] then
-				if currTime >= ESX.TimeoutCallbacks[i].time then
-					ESX.TimeoutCallbacks[i].cb()
-					ESX.TimeoutCallbacks[i] = nil
+		if #ESX.TimeoutCallbacks > 0 then
+			letSleep = false
+			for i=1, #ESX.TimeoutCallbacks, 1 do
+				if ESX.TimeoutCallbacks[i] then
+					if currTime >= ESX.TimeoutCallbacks[i].time then
+						ESX.TimeoutCallbacks[i].cb()
+						ESX.TimeoutCallbacks[i] = nil
+					end
 				end
 			end
+		end
+		if letSleep then
+			Citizen.Wait(500)
 		end
 	end
 end)
